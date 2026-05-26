@@ -1,0 +1,223 @@
+// Merit Portal — physician + pharmacy data model
+//
+// Design principles:
+//  • PHI (medical history, ID photos, lab results) is kept ONLY here and on
+//    S3 — never in Shopify. Shopify holds payment + shipping + order status.
+//  • Every state change is audit-logged for HIPAA defensibility later.
+//  • User roles are explicit (PHYSICIAN, PHARMACY, OPS) — no implicit
+//    privilege escalation.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Users ───────────────────────────────────────────────────────────
+//
+// Used for staff: physicians, pharmacy operators, Merit ops.
+// Patients do NOT have records here — they live in Shopify customers.
+enum UserRole {
+  PHYSICIAN
+  PHARMACY
+  OPS
+}
+
+model User {
+  id          String   @id @default(cuid())
+  email       String   @unique
+  name        String?
+  role        UserRole
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  lastLoginAt DateTime?
+
+  // NextAuth relations
+  accounts    Account[]
+  sessions    Session[]
+
+  // Audit trail
+  intakeActions IntakeAction[]
+  pharmacyActions PharmacyAction[]
+}
+
+// ─── NextAuth tables (required for the Prisma adapter) ──────────────
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// ─── Intake submissions ─────────────────────────────────────────────
+//
+// One row per intake form submission. Stores the medical history + the
+// link to the Shopify customer and order so we can sync state both ways.
+enum IntakeStatus {
+  SUBMITTED        // intake received, payment not yet completed
+  PAID             // Shopify checkout completed
+  UNDER_REVIEW    // physician is looking at it
+  LABS_REQUESTED  // physician needs labs
+  LABS_RECEIVED   // labs uploaded by patient
+  APPROVED        // physician approved, ready for pharmacy
+  REJECTED        // physician declined; will trigger Shopify refund
+  SENT_TO_PHARMACY // prescription handed off
+  SHIPPED          // pharmacy shipped
+  DELIVERED        // tracking confirms delivery
+}
+
+enum CompoundRequested {
+  TIRZEPATIDE   // /products/ly3298176
+  RETATRUTIDE   // /products/ly3437943
+  TESAMORELIN   // /products/th9507
+}
+
+model Intake {
+  id                String            @id @default(cuid())
+  submissionRef     String            @unique // human-readable e.g. RX-3XF2K9
+  status            IntakeStatus      @default(SUBMITTED)
+  compound          CompoundRequested
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+
+  // Patient identity (PHI-adjacent — name/email/phone)
+  patientFirstName  String
+  patientLastName   String
+  patientEmail      String
+  patientPhone      String
+  patientDob        DateTime
+  patientState      String            // 2-letter US state code
+
+  // Body metrics
+  heightInches      Int               // total height in inches
+  weightLbs         Int
+
+  // Health screen — the 7 yes/nos
+  screenPregnant         Boolean
+  screenMtcMen2          Boolean
+  screenPancreatitis     Boolean
+  screenCurrentIncretin  Boolean
+  screenIncretinAllergy  Boolean
+  screenEatingDisorder   Boolean
+  screenDiabetesMeds     Boolean
+
+  // Allergies + notes
+  hasAllergies      Boolean
+  allergiesDetails  String?           @db.Text
+  additionalNotes   String?           @db.Text
+
+  // Storage references (PHI lives in S3, never in DB column)
+  idPhotoKey        String?           // S3 object key for the photo ID
+  labResultsKey     String?           // S3 object key for lab PDF, if requested
+
+  // Routing path determined by the intake form
+  routingPath       String            // 'A' | 'B' | 'C'
+  routingReason     String?           // e.g. 'bmi-low', 'mtc-or-pancreatitis'
+
+  // Link to Shopify (set when payment completes)
+  shopifyCustomerId String?           // gid://shopify/Customer/...
+  shopifyOrderId    String?           // gid://shopify/Order/...
+  shopifyOrderName  String?           // human-readable #1234
+
+  // Rx expiration (set when physician approves)
+  rxExpiresAt       DateTime?
+
+  // Relations
+  actions           IntakeAction[]
+  messages          IntakeMessage[]
+  pharmacyOrder     PharmacyOrder?
+}
+
+// ─── Audit log per intake ────────────────────────────────────────────
+model IntakeAction {
+  id          String       @id @default(cuid())
+  intakeId    String
+  intake      Intake       @relation(fields: [intakeId], references: [id], onDelete: Cascade)
+  actorId     String?      // user who performed it (null = system)
+  actor       User?        @relation(fields: [actorId], references: [id])
+  action      String       // e.g. 'STATUS_CHANGE', 'NOTE_ADDED', 'EMAIL_SENT'
+  fromStatus  IntakeStatus?
+  toStatus    IntakeStatus?
+  payload     Json?        // free-form context
+  createdAt   DateTime     @default(now())
+}
+
+// ─── Patient ↔ care-team messaging ──────────────────────────────────
+model IntakeMessage {
+  id          String   @id @default(cuid())
+  intakeId    String
+  intake      Intake   @relation(fields: [intakeId], references: [id], onDelete: Cascade)
+  fromRole    String   // 'patient' | 'physician' | 'pharmacy' | 'ops'
+  fromName    String?
+  body        String   @db.Text
+  attachments String[] // S3 object keys
+  readAt      DateTime?
+  createdAt   DateTime @default(now())
+}
+
+// ─── Pharmacy-side order (set on physician approval) ────────────────
+enum PharmacyOrderStatus {
+  PENDING        // waiting for pharmacy to claim
+  COMPOUNDING    // pharmacy is making it
+  PACKED         // ready to ship
+  SHIPPED
+  DELIVERED
+}
+
+model PharmacyOrder {
+  id              String              @id @default(cuid())
+  intakeId        String              @unique
+  intake          Intake              @relation(fields: [intakeId], references: [id], onDelete: Cascade)
+  status          PharmacyOrderStatus @default(PENDING)
+  trackingNumber  String?
+  trackingCarrier String?
+  trackingUrl     String?
+  shippedAt       DateTime?
+  deliveredAt     DateTime?
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+  actions         PharmacyAction[]
+}
+
+model PharmacyAction {
+  id              String        @id @default(cuid())
+  pharmacyOrderId String
+  pharmacyOrder   PharmacyOrder @relation(fields: [pharmacyOrderId], references: [id], onDelete: Cascade)
+  actorId         String?
+  actor           User?         @relation(fields: [actorId], references: [id])
+  action          String
+  payload         Json?
+  createdAt       DateTime      @default(now())
+}

@@ -1,0 +1,65 @@
+/* Minimal portal styles. Tailwind will land in Phase 1 polish. */
+:root {
+  --merit-cream: #FAFAF7;
+  --merit-cobalt: #2E4DDB;
+  --merit-cobalt-dark: #1E3BC0;
+  --merit-ink: #0B0F19;
+  --merit-mid: #4A5160;
+  --merit-soft: #6E7585;
+  --merit-line: #E5E2DC;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  color: var(--merit-ink);
+  background: var(--merit-cream);
+  -webkit-font-smoothing: antialiased;
+}
+
+.shell {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 32px 24px;
+}
+
+.card {
+  background: #fff;
+  border: 1px solid var(--merit-line);
+  border-radius: 14px;
+  padding: 28px;
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 11px 20px;
+  background: var(--merit-cobalt);
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  font: 600 14.5px 'Inter', sans-serif;
+  cursor: pointer;
+  text-decoration: none;
+}
+.btn:hover { background: var(--merit-cobalt-dark); }
+.btn--ghost { background: transparent; color: var(--merit-ink); border: 1px solid var(--merit-line); }
+.btn--ghost:hover { background: #F4F1EA; }
+
+input[type="email"], input[type="text"] {
+  width: 100%;
+  padding: 12px 14px;
+  border: 1px solid #D1D5DC;
+  border-radius: 8px;
+  font: 14.5px 'Inter', sans-serif;
+  color: var(--merit-ink);
+  background: #fff;
+}
+input:focus {
+  outline: none;
+  border-color: var(--merit-cobalt);
+  box-shadow: 0 0 0 3px rgba(46, 77, 219, 0.12);
+}
