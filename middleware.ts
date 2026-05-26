@@ -1,28 +1,32 @@
-// Route-level role enforcement. Sits in front of /physician/* and /pharmacy/*
-// to gate them by the session's role claim.
+// Edge-runtime middleware: role-based route gating.
 //
-// NextAuth v5's middleware export keeps the same session API as in pages.
+// Uses the lightweight auth.config (no Prisma) so it stays Edge-safe.
+// Role + userId are read from the JWT (set in lib/auth.ts during sign-in).
 
-import { auth } from "@/lib/auth";
+import NextAuth from "next-auth";
 import { NextResponse } from "next/server";
+import authConfig from "@/lib/auth.config";
+
+const { auth } = NextAuth(authConfig);
 
 export default auth((req) => {
   const path = req.nextUrl.pathname;
   const session = req.auth;
   const role = (session?.user as { role?: string } | undefined)?.role;
 
-  // Unauthenticated → bounce to signin (except signin routes + api/auth)
-  const isAuthRoute =
+  // Routes that don't need auth: signin pages + NextAuth's own routes + the
+  // public Shopify webhook (verified by HMAC signature instead).
+  const isPublic =
     path.startsWith("/signin") ||
     path.startsWith("/api/auth") ||
-    path.startsWith("/api/shopify-webhook"); // webhooks verified by signature instead
-  if (!session && !isAuthRoute) {
+    path.startsWith("/api/shopify-webhook");
+
+  if (!session && !isPublic) {
     const signin = req.nextUrl.clone();
     signin.pathname = "/signin";
     return NextResponse.redirect(signin);
   }
 
-  // Role gates
   if (path.startsWith("/physician") && !(role === "PHYSICIAN" || role === "OPS")) {
     return NextResponse.redirect(new URL("/signin/error?reason=role", req.url));
   }
@@ -33,7 +37,6 @@ export default auth((req) => {
   return NextResponse.next();
 });
 
-// Apply to everything except static assets + the favicon
 export const config = {
   matcher: ["/((?!_next/static|_next/image|favicon.ico|.*\\.png$).*)"],
 };

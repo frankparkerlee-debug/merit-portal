@@ -1,33 +1,25 @@
-// NextAuth v5 (Auth.js) — email-magic-link auth via Postmark.
-// Staff-only: physicians, pharmacy users, ops. Patients live in Shopify.
+// Full NextAuth config with Prisma adapter — Node-runtime only.
+// Imported by API routes and server actions. NOT by middleware (Edge).
 //
-// Allow-list model: nobody can sign in unless their email is pre-provisioned
-// in the User table with a role. No public sign-up. New staff are seeded
-// manually (we add them via Prisma Studio or a one-off script).
+// Session strategy is JWT so the role is carried in the token and readable
+// from Edge middleware without a DB round-trip. The Prisma adapter still
+// manages User, Account, Session, and VerificationToken tables (needed for
+// the magic-link email flow).
 
 import NextAuth from "next-auth";
 import { PrismaAdapter } from "@auth/prisma-adapter";
-import Postmark from "next-auth/providers/postmark";
+import authConfig from "@/lib/auth.config";
 import { prisma } from "@/lib/db";
 
 export const { handlers, signIn, signOut, auth } = NextAuth({
+  ...authConfig,
   adapter: PrismaAdapter(prisma),
-  session: { strategy: "database" },
-  providers: [
-    Postmark({
-      apiKey: process.env.POSTMARK_API_KEY!,
-      from: process.env.POSTMARK_FROM_EMAIL ?? "no-reply@meritsciences.com",
-    }),
-  ],
-  pages: {
-    signIn: "/signin",
-    verifyRequest: "/signin/check-email",
-    error: "/signin/error",
-  },
+  session: { strategy: "jwt" },
   callbacks: {
-    // Allow-list gate: only accept logins for emails that already exist as a
-    // staff user. Prevents anyone from creating a portal account by guessing
-    // the magic-link flow.
+    ...authConfig.callbacks,
+
+    // Allow-list gate: only let an email through sign-in if it already
+    // exists in the User table and is active. No public sign-ups.
     async signIn({ user }) {
       if (!user.email) return false;
       const existing = await prisma.user.findUnique({
@@ -36,27 +28,45 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
       });
       return existing?.active === true;
     },
-    async session({ session, user }) {
-      // Attach role to the session so middleware can gate by it.
-      const dbUser = await prisma.user.findUnique({
-        where: { id: user.id },
-        select: { role: true, active: true },
-      });
-      if (dbUser) {
-        (session.user as { role?: string; active?: boolean }).role = dbUser.role;
-        (session.user as { role?: string; active?: boolean }).active = dbUser.active;
+
+    // Embed role + DB user id in the JWT so middleware can read them.
+    async jwt({ token, user }) {
+      // First sign-in: user is populated. Subsequent calls: only token.
+      const email = (user?.email ?? token.email) as string | undefined;
+      if (email) {
+        const dbUser = await prisma.user.findUnique({
+          where: { email },
+          select: { id: true, role: true, active: true },
+        });
+        if (dbUser) {
+          (token as { role?: string; userId?: string; active?: boolean }).role = dbUser.role;
+          (token as { role?: string; userId?: string; active?: boolean }).userId = dbUser.id;
+          (token as { role?: string; userId?: string; active?: boolean }).active = dbUser.active;
+        }
+      }
+      return token;
+    },
+
+    // Expose role on the session object so server components can read it.
+    async session({ session, token }) {
+      if (session.user) {
+        (session.user as { role?: string; id?: string; active?: boolean }).role =
+          (token as { role?: string }).role;
+        (session.user as { role?: string; id?: string; active?: boolean }).id =
+          (token as { userId?: string }).userId;
+        (session.user as { role?: string; id?: string; active?: boolean }).active =
+          (token as { active?: boolean }).active;
       }
       return session;
     },
   },
   events: {
     async signIn({ user }) {
-      // Update lastLoginAt on every successful sign-in
-      if (user.id) {
+      if (user?.id) {
         await prisma.user.update({
           where: { id: user.id },
           data: { lastLoginAt: new Date() },
-        });
+        }).catch(() => {});
       }
     },
   },
