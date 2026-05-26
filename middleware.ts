@@ -12,6 +12,7 @@ const { auth } = NextAuth(authConfig);
 export default auth((req) => {
   const path = req.nextUrl.pathname;
   const session = req.auth;
+  const isAuthed = Boolean(session?.user?.email);
   const role = (session?.user as { role?: string } | undefined)?.role;
 
   // Routes that don't need auth: signin pages + NextAuth's own routes + the
@@ -21,17 +22,21 @@ export default auth((req) => {
     path.startsWith("/api/auth") ||
     path.startsWith("/api/shopify-webhook");
 
-  if (!session && !isPublic) {
+  if (!isAuthed && !isPublic) {
     const signin = req.nextUrl.clone();
     signin.pathname = "/signin";
+    signin.search = "";
     return NextResponse.redirect(signin);
   }
 
-  if (path.startsWith("/physician") && !(role === "PHYSICIAN" || role === "OPS")) {
-    return NextResponse.redirect(new URL("/signin/error?reason=role", req.url));
-  }
-  if (path.startsWith("/pharmacy") && !(role === "PHARMACY" || role === "OPS")) {
-    return NextResponse.redirect(new URL("/signin/error?reason=role", req.url));
+  // Authed: gate by role
+  if (isAuthed) {
+    if (path.startsWith("/physician") && !(role === "PHYSICIAN" || role === "OPS")) {
+      return NextResponse.redirect(new URL("/signin/error?reason=role", req.url));
+    }
+    if (path.startsWith("/pharmacy") && !(role === "PHARMACY" || role === "OPS")) {
+      return NextResponse.redirect(new URL("/signin/error?reason=role", req.url));
+    }
   }
 
   return NextResponse.next();
