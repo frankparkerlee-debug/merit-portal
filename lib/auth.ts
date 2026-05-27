@@ -88,13 +88,21 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
     // Allow-list gate: only let an email through sign-in if it's in the
     // User table and active. No public sign-ups.
     async signIn({ user }) {
-      const email = user?.email?.toLowerCase();
-      if (!email) return false;
+      const rawEmail = user?.email;
+      const email = rawEmail?.toLowerCase();
+      console.log("[signIn] raw email:", JSON.stringify(rawEmail), "→ lowercased:", JSON.stringify(email));
+      if (!email) {
+        console.log("[signIn] REJECT: no email on user object");
+        return false;
+      }
       const existing = await prisma.user.findUnique({
         where: { email },
-        select: { active: true },
+        select: { id: true, active: true, role: true },
       });
-      return existing?.active === true;
+      console.log("[signIn] DB lookup result:", JSON.stringify(existing));
+      const allowed = existing?.active === true;
+      console.log("[signIn] decision:", allowed ? "ALLOW" : "REJECT");
+      return allowed;
     },
 
     async jwt({ token, user }) {
