@@ -17,7 +17,15 @@ export default function SignInPage() {
       callbackUrl: "/",
     });
     if (res?.error) {
-      setErr("Couldn't send the sign-in email. Check the address or contact ops.");
+      // res.error from NextAuth is usually one of "EmailSignin", "Verification",
+      // "AccessDenied" (allow-list rejection), or the underlying transport error.
+      const detail =
+        res.error === "AccessDenied"
+          ? "This email isn't on the staff allow-list. Contact ops to be added."
+          : res.error === "Verification"
+            ? "The sign-in link couldn't be verified. Request a new one."
+            : "Couldn't send the sign-in email — usually a Postmark sender / approval issue. Check Render logs.";
+      setErr(detail);
       setSubmitting(false);
       return;
     }
