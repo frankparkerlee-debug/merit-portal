@@ -120,6 +120,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
 
     async jwt({ token, user }) {
       const email = (user?.email ?? token.email)?.toLowerCase() as string | undefined;
+      console.log(`[jwt] enter email=${email ?? "-"} hadUser=${Boolean(user)} tokenRole=${(token as { role?: string }).role ?? "-"}`);
       if (email) {
         const dbUser = await prisma.user.findUnique({
           where: { email },
@@ -129,6 +130,9 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
           (token as { role?: string; userId?: string; active?: boolean }).role = dbUser.role;
           (token as { role?: string; userId?: string; active?: boolean }).userId = dbUser.id;
           (token as { role?: string; userId?: string; active?: boolean }).active = dbUser.active;
+          console.log(`[jwt] enriched token with role=${dbUser.role} userId=${dbUser.id}`);
+        } else {
+          console.log(`[jwt] no dbUser found for ${email}`);
         }
       }
       return token;
