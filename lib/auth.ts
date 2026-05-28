@@ -54,8 +54,17 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
       // chain is unfamiliar. Disabling tracking sends users straight to our
       // domain.
       async sendVerificationRequest({ identifier, url, provider }) {
-        const host = new URL(url).host;
-        const { text, html } = buildMagicLinkEmail({ url, host });
+        // Wrap the real NextAuth callback in our /signin/confirm page so that
+        // Gmail/Outlook/Postmark "safe link" scanners that GET the URL before
+        // the user clicks can't consume the verification token. The confirm
+        // page requires a JS-driven button click to redirect to the actual
+        // callback — scanners don't execute JS and don't click buttons.
+        const verifyUrl = new URL(url);
+        const confirmUrl = new URL(`${verifyUrl.origin}/signin/confirm`);
+        confirmUrl.searchParams.set("target", url);
+        const linkUrl = confirmUrl.toString();
+        const host = verifyUrl.host;
+        const { text, html } = buildMagicLinkEmail({ url: linkUrl, host });
         const res = await fetch("https://api.postmarkapp.com/email", {
           method: "POST",
           headers: {
