@@ -60,6 +60,16 @@ export default async function PharmacyDetail({
     }
   }
 
+  // Build the Shopify Admin deep-link for the "Buy label in Shopify" CTA.
+  // Format: https://admin.shopify.com/store/<store-handle>/orders/<numeric-id>
+  let shopifyOrderAdminUrl: string | null = null;
+  if (order.intake.shopifyOrderId) {
+    const numericId = order.intake.shopifyOrderId.split("/").pop();
+    if (numericId) {
+      shopifyOrderAdminUrl = `https://admin.shopify.com/store/meritpeptides/orders/${numericId}`;
+    }
+  }
+
   return (
     <div className="shell" style={{ maxWidth: 1040 }}>
       <div style={{ marginBottom: 18 }}>
@@ -208,6 +218,7 @@ export default async function PharmacyDetail({
             existingTrackingCarrier={order.trackingCarrier ?? ""}
             existingTrackingUrl={order.trackingUrl ?? ""}
             actorEmail={session?.user?.email ?? ""}
+            shopifyOrderAdminUrl={shopifyOrderAdminUrl}
           />
         </aside>
       </div>

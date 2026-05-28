@@ -18,9 +18,13 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+import { promises as fs } from "fs";
+import path from "path";
 import { prisma } from "@/lib/db";
 import { saveIntakeFile } from "@/lib/intake-storage";
 import { newSubmissionRef } from "@/lib/intake-ref";
+
+const UPLOADS_ROOT = process.env.INTAKE_UPLOADS_DIR ?? "/var/data/intake-uploads";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -28,6 +32,9 @@ export const dynamic = "force-dynamic";
 const MAX_FILE_BYTES = 8 * 1024 * 1024;
 
 const intakeSchema = z.object({
+  // Client-generated submission ref (optional — server falls back to its own).
+  // When present, it must match the staging-endpoint's strict ref pattern.
+  submission_ref: z.string().regex(/^RX-[A-Z0-9]{6,16}$/).optional(),
   // Compound
   compound: z.enum(["tirzepatide", "retatrutide", "tesamorelin"]),
   // Patient identity
@@ -127,8 +134,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "file_too_large" }, { status: 413, headers: cors });
   }
 
-  // Create the intake row, then save the file under that row's id.
-  const submissionRef = newSubmissionRef();
+  // Submission ref: client-supplied if present (the background-upload flow
+  // generates it on page-load so it can pre-stage the photo before submit),
+  // otherwise fall back to a server-generated one.
+  const submissionRef = data.submission_ref ?? newSubmissionRef();
   const totalInches = data.height_ft * 12 + data.height_in;
   const intake = await prisma.intake.create({
     data: {
@@ -158,19 +167,41 @@ export async function POST(req: NextRequest) {
     },
   });
 
-  // Save the ID photo and update the row with its key
-  if (photo) {
-    try {
+  // Resolve the ID photo. Two paths:
+  //  1. Pre-staged (background-upload flow): the photo was uploaded via
+  //     /api/intake/photo-stage when the patient picked the file. We look
+  //     for the staged file by submissionRef and move it into the intake's
+  //     own directory.
+  //  2. Inline (legacy flow): the photo arrived in the same multipart POST.
+  //     We save it directly.
+  let finalPhotoKey: string | null = null;
+  const stagedDir = path.join(UPLOADS_ROOT, "_staging", submissionRef);
+  try {
+    const stagedFiles = await fs.readdir(stagedDir).catch(() => [] as string[]);
+    const stagedPhoto = stagedFiles.find((f) => f.startsWith("id-photo-"));
+    if (stagedPhoto) {
+      // Move staged → final
+      const targetDir = path.join(UPLOADS_ROOT, intake.id);
+      await fs.mkdir(targetDir, { recursive: true });
+      const srcPath = path.join(stagedDir, stagedPhoto);
+      const destPath = path.join(targetDir, stagedPhoto);
+      await fs.rename(srcPath, destPath);
+      await fs.rmdir(stagedDir).catch(() => {}); // best-effort cleanup
+      finalPhotoKey = `${intake.id}/${stagedPhoto}`;
+    } else if (photo) {
       const stored = await saveIntakeFile(intake.id, photo, "id-photo");
+      finalPhotoKey = stored.key;
+    }
+    if (finalPhotoKey) {
       await prisma.intake.update({
         where: { id: intake.id },
-        data: { idPhotoKey: stored.key },
+        data: { idPhotoKey: finalPhotoKey },
       });
-    } catch (err) {
-      console.error("[intake] photo save failed:", err);
-      // Don't fail the whole intake — the row still exists; ops can request
-      // a re-upload via the patient communications channel.
     }
+  } catch (err) {
+    console.error("[intake] photo resolve failed:", err);
+    // Don't fail the whole intake — the row still exists; ops can request
+    // a re-upload via the patient communications channel.
   }
 
   // Audit log

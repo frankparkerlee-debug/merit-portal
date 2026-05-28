@@ -10,6 +10,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { PRESCRIBING_PHYSICIAN } from "@/lib/clinic";
 import { ActionPanel } from "./action-panel";
 
 export const dynamic = "force-dynamic";
@@ -87,6 +88,12 @@ export default async function IntakeDetail({
             <div style={{ color: "var(--merit-soft)", fontSize: 14 }}>
               {age}y · {intake.patientState} · Requesting{" "}
               <span style={{ fontFamily: "'JetBrains Mono',monospace" }}>{COMPOUND_LABEL[intake.compound] ?? intake.compound}</span>
+            </div>
+            <div style={{ marginTop: 14, padding: "10px 14px", background: "#F4F1EA", borderLeft: "3px solid var(--merit-cobalt)", borderRadius: 4, fontSize: 13, color: "var(--merit-mid)" }}>
+              <span style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 10.5, letterSpacing: "0.18em", textTransform: "uppercase", color: "var(--merit-cobalt)", fontWeight: 600, marginRight: 10 }}>
+                Prescribing physician
+              </span>
+              <strong style={{ color: "var(--merit-ink)" }}>{PRESCRIBING_PHYSICIAN.name}</strong>
             </div>
           </header>
 

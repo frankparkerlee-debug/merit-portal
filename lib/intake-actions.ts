@@ -13,6 +13,7 @@
 
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { sendPatientEmail } from "@/lib/patient-mail";
 
 async function requirePhysician() {
   const session = await auth();
@@ -26,7 +27,10 @@ async function requirePhysician() {
 
 export async function markUnderReview(intakeId: string, _actorEmail: string) {
   const { userId } = await requirePhysician();
-  const intake = await prisma.intake.findUnique({ where: { id: intakeId }, select: { status: true } });
+  const intake = await prisma.intake.findUnique({
+    where: { id: intakeId },
+    select: { status: true, patientEmail: true, patientFirstName: true, submissionRef: true, shopifyOrderName: true },
+  });
   if (!intake) throw new Error("Intake not found");
   await prisma.$transaction([
     prisma.intake.update({ where: { id: intakeId }, data: { status: "UNDER_REVIEW" } }),
@@ -40,13 +44,22 @@ export async function markUnderReview(intakeId: string, _actorEmail: string) {
       },
     }),
   ]);
+  await sendPatientEmail("REVIEWING", {
+    to: intake.patientEmail,
+    patientFirstName: intake.patientFirstName,
+    submissionRef: intake.submissionRef,
+    orderName: intake.shopifyOrderName,
+  });
 }
 
 export async function approveIntake(intakeId: string, _actorEmail: string) {
   const { userId } = await requirePhysician();
   const intake = await prisma.intake.findUnique({
     where: { id: intakeId },
-    select: { status: true, pharmacyOrder: true },
+    select: {
+      status: true, pharmacyOrder: true,
+      patientEmail: true, patientFirstName: true, submissionRef: true, shopifyOrderName: true,
+    },
   });
   if (!intake) throw new Error("Intake not found");
 
@@ -76,13 +89,20 @@ export async function approveIntake(intakeId: string, _actorEmail: string) {
     }
   });
 
-  // TODO: Shopify — mark the linked order as ready-to-fulfill so pharmacy
-  // sees it appear in their queue. Will wire once portal Shopify client lands.
+  await sendPatientEmail("APPROVED", {
+    to: intake.patientEmail,
+    patientFirstName: intake.patientFirstName,
+    submissionRef: intake.submissionRef,
+    orderName: intake.shopifyOrderName,
+  });
 }
 
 export async function requestLabs(intakeId: string, _actorEmail: string, reason: string) {
   const { userId } = await requirePhysician();
-  const intake = await prisma.intake.findUnique({ where: { id: intakeId }, select: { status: true } });
+  const intake = await prisma.intake.findUnique({
+    where: { id: intakeId },
+    select: { status: true, patientEmail: true, patientFirstName: true, submissionRef: true, shopifyOrderName: true },
+  });
   if (!intake) throw new Error("Intake not found");
 
   await prisma.$transaction([
@@ -106,14 +126,23 @@ export async function requestLabs(intakeId: string, _actorEmail: string, reason:
     }),
   ]);
 
-  // TODO: email the patient via Postmark with the lab order
+  await sendPatientEmail("LABS_REQUESTED", {
+    to: intake.patientEmail,
+    patientFirstName: intake.patientFirstName,
+    submissionRef: intake.submissionRef,
+    orderName: intake.shopifyOrderName,
+    reason,
+  });
 }
 
 export async function rejectIntake(intakeId: string, _actorEmail: string, reason: string) {
   const { userId } = await requirePhysician();
   const intake = await prisma.intake.findUnique({
     where: { id: intakeId },
-    select: { status: true, shopifyOrderId: true },
+    select: {
+      status: true, shopifyOrderId: true,
+      patientEmail: true, patientFirstName: true, submissionRef: true, shopifyOrderName: true,
+    },
   });
   if (!intake) throw new Error("Intake not found");
 
@@ -137,6 +166,14 @@ export async function rejectIntake(intakeId: string, _actorEmail: string, reason
       },
     }),
   ]);
+
+  await sendPatientEmail("REJECTED", {
+    to: intake.patientEmail,
+    patientFirstName: intake.patientFirstName,
+    submissionRef: intake.submissionRef,
+    orderName: intake.shopifyOrderName,
+    reason,
+  });
 
   // TODO: Shopify — POST the refund order mutation if a paid order exists.
 }

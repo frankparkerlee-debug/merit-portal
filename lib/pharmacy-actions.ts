@@ -15,6 +15,7 @@
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { createShopifyFulfillment } from "@/lib/shopify";
+import { sendPatientEmail } from "@/lib/patient-mail";
 
 async function requirePharmacy() {
   const session = await auth();
@@ -30,7 +31,10 @@ export async function startCompounding(orderId: string, _actorEmail: string) {
   const { userId } = await requirePharmacy();
   const order = await prisma.pharmacyOrder.findUnique({
     where: { id: orderId },
-    select: { status: true, intakeId: true },
+    select: {
+      status: true, intakeId: true,
+      intake: { select: { patientEmail: true, patientFirstName: true, submissionRef: true, shopifyOrderName: true } },
+    },
   });
   if (!order) throw new Error("Order not found");
   await prisma.$transaction([
@@ -48,13 +52,22 @@ export async function startCompounding(orderId: string, _actorEmail: string) {
       data: { status: "SENT_TO_PHARMACY" },
     }),
   ]);
+  await sendPatientEmail("COMPOUNDING", {
+    to: order.intake.patientEmail,
+    patientFirstName: order.intake.patientFirstName,
+    submissionRef: order.intake.submissionRef,
+    orderName: order.intake.shopifyOrderName,
+  });
 }
 
 export async function markPacked(orderId: string, _actorEmail: string) {
   const { userId } = await requirePharmacy();
   const order = await prisma.pharmacyOrder.findUnique({
     where: { id: orderId },
-    select: { status: true },
+    select: {
+      status: true,
+      intake: { select: { patientEmail: true, patientFirstName: true, submissionRef: true, shopifyOrderName: true } },
+    },
   });
   if (!order) throw new Error("Order not found");
   await prisma.$transaction([
@@ -67,6 +80,12 @@ export async function markPacked(orderId: string, _actorEmail: string) {
       },
     }),
   ]);
+  await sendPatientEmail("PACKED", {
+    to: order.intake.patientEmail,
+    patientFirstName: order.intake.patientFirstName,
+    submissionRef: order.intake.submissionRef,
+    orderName: order.intake.shopifyOrderName,
+  });
 }
 
 export async function markShipped(

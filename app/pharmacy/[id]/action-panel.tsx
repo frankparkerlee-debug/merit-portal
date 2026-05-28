@@ -22,6 +22,7 @@ export function PharmacyActionPanel({
   existingTrackingCarrier,
   existingTrackingUrl,
   actorEmail,
+  shopifyOrderAdminUrl,
 }: {
   orderId: string;
   currentStatus: string;
@@ -29,6 +30,7 @@ export function PharmacyActionPanel({
   existingTrackingCarrier: string;
   existingTrackingUrl: string;
   actorEmail: string;
+  shopifyOrderAdminUrl: string | null;
 }) {
   const router = useRouter();
   const [busy, startTransition] = useTransition();
@@ -88,15 +90,28 @@ export function PharmacyActionPanel({
             </button>
           )}
           {currentStatus === "PACKED" && (
-            <button
-              type="button"
-              className="btn"
-              style={{ width: "100%", justifyContent: "center" }}
-              disabled={busy}
-              onClick={() => setMode("ship")}
-            >
-              Mark shipped →
-            </button>
+            <>
+              {shopifyOrderAdminUrl && (
+                <a
+                  href={shopifyOrderAdminUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="btn"
+                  style={{ width: "100%", justifyContent: "center", background: "#2E4DDB", borderColor: "#2E4DDB" }}
+                >
+                  Buy label in Shopify ↗
+                </a>
+              )}
+              <button
+                type="button"
+                className="btn btn--ghost"
+                style={{ width: "100%", justifyContent: "center", fontSize: 13 }}
+                disabled={busy}
+                onClick={() => setMode("ship")}
+              >
+                Or enter tracking manually
+              </button>
+            </>
           )}
           {currentStatus === "SHIPPED" && (
             <button
