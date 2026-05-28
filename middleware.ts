@@ -20,6 +20,7 @@ export default auth((req) => {
   const isPublic =
     path.startsWith("/signin") ||
     path.startsWith("/api/auth") ||
+    path.startsWith("/api/signin") || // /api/signin/finalize completes the magic-link flow pre-session
     path.startsWith("/api/shopify-webhook");
 
   if (!isAuthed && !isPublic) {

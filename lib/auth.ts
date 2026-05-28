@@ -7,6 +7,7 @@ import { PrismaAdapter } from "@auth/prisma-adapter";
 import Postmark from "next-auth/providers/postmark";
 import authConfig from "@/lib/auth.config";
 import { prisma } from "@/lib/db";
+import { encodeConfirmToken } from "@/lib/confirm-token";
 
 // Merit-branded magic-link email body.
 function buildMagicLinkEmail({ url, host }: { url: string; host: string }) {
@@ -54,14 +55,17 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
       // chain is unfamiliar. Disabling tracking sends users straight to our
       // domain.
       async sendVerificationRequest({ identifier, url, provider }) {
-        // Wrap the real NextAuth callback in our /signin/confirm page so that
-        // Gmail/Outlook/Postmark "safe link" scanners that GET the URL before
-        // the user clicks can't consume the verification token. The confirm
-        // page requires a JS-driven button click to redirect to the actual
-        // callback — scanners don't execute JS and don't click buttons.
+        // Wrap the NextAuth callback URL in an HMAC-signed token. The email
+        // link carries only the opaque token — the actual callback URL is
+        // never exposed in any query string or HTML the email-scanner bots
+        // can see. The /signin/confirm page renders a static form; only a
+        // POST (which scanners don't do) reveals the inner URL via a
+        // server-side 303 redirect. See lib/confirm-token.ts for the
+        // background on why the interstitial alone wasn't enough.
         const verifyUrl = new URL(url);
+        const confirmToken = encodeConfirmToken(url);
         const confirmUrl = new URL(`${verifyUrl.origin}/signin/confirm`);
-        confirmUrl.searchParams.set("target", url);
+        confirmUrl.searchParams.set("t", confirmToken);
         const linkUrl = confirmUrl.toString();
         const host = verifyUrl.host;
         const { text, html } = buildMagicLinkEmail({ url: linkUrl, host });
