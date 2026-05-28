@@ -27,18 +27,20 @@ enum UserRole {
 }
 
 model User {
-  id          String   @id @default(cuid())
-  email       String   @unique
-  name        String?
-  role        UserRole
-  active      Boolean  @default(true)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  lastLoginAt DateTime?
+  id            String    @id @default(cuid())
+  email         String    @unique
+  emailVerified DateTime?                  // Set by NextAuth on first magic-link click (required by adapter)
+  image         String?                    // Standard NextAuth field
+  name          String?
+  role          UserRole
+  active        Boolean   @default(true)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  lastLoginAt   DateTime?
 
   // NextAuth relations
-  accounts    Account[]
-  sessions    Session[]
+  accounts      Account[]
+  sessions      Session[]
 
   // Audit trail
   intakeActions IntakeAction[]
