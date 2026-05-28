@@ -101,26 +101,17 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
     // Allow-list gate: only let an email through sign-in if it's in the
     // User table and active. No public sign-ups.
     async signIn({ user }) {
-      const rawEmail = user?.email;
-      const email = rawEmail?.toLowerCase();
-      console.log("[signIn] raw email:", JSON.stringify(rawEmail), "→ lowercased:", JSON.stringify(email));
-      if (!email) {
-        console.log("[signIn] REJECT: no email on user object");
-        return false;
-      }
+      const email = user?.email?.toLowerCase();
+      if (!email) return false;
       const existing = await prisma.user.findUnique({
         where: { email },
-        select: { id: true, active: true, role: true },
+        select: { active: true },
       });
-      console.log("[signIn] DB lookup result:", JSON.stringify(existing));
-      const allowed = existing?.active === true;
-      console.log("[signIn] decision:", allowed ? "ALLOW" : "REJECT");
-      return allowed;
+      return existing?.active === true;
     },
 
     async jwt({ token, user }) {
       const email = (user?.email ?? token.email)?.toLowerCase() as string | undefined;
-      console.log(`[jwt] enter email=${email ?? "-"} hadUser=${Boolean(user)} tokenRole=${(token as { role?: string }).role ?? "-"}`);
       if (email) {
         const dbUser = await prisma.user.findUnique({
           where: { email },
@@ -130,9 +121,6 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
           (token as { role?: string; userId?: string; active?: boolean }).role = dbUser.role;
           (token as { role?: string; userId?: string; active?: boolean }).userId = dbUser.id;
           (token as { role?: string; userId?: string; active?: boolean }).active = dbUser.active;
-          console.log(`[jwt] enriched token with role=${dbUser.role} userId=${dbUser.id}`);
-        } else {
-          console.log(`[jwt] no dbUser found for ${email}`);
         }
       }
       return token;

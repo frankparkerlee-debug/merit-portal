@@ -38,9 +38,6 @@ export default async function middleware(req: NextRequest) {
   const role = token?.role as string | undefined;
   const isAuthed = Boolean(email);
 
-  // Diagnostic — remove once stable
-  console.log(`[mw] path=${path} authed=${isAuthed} email=${email ?? "-"} role=${role ?? "-"}`);
-
   if (!isAuthed && !isPublic) {
     const signin = req.nextUrl.clone();
     signin.pathname = "/signin";
@@ -51,11 +48,9 @@ export default async function middleware(req: NextRequest) {
   // Authed: gate by role
   if (isAuthed) {
     if (path.startsWith("/physician") && !(role === "PHYSICIAN" || role === "OPS")) {
-      console.log(`[mw] reject /physician: role=${role}`);
       return NextResponse.redirect(new URL("/signin/error?reason=role", req.url));
     }
     if (path.startsWith("/pharmacy") && !(role === "PHARMACY" || role === "OPS")) {
-      console.log(`[mw] reject /pharmacy: role=${role}`);
       return NextResponse.redirect(new URL("/signin/error?reason=role", req.url));
     }
   }
