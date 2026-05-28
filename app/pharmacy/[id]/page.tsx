@@ -9,7 +9,9 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { getOrderShippingDetails } from "@/lib/shopify";
 import { PharmacyActionPanel } from "./action-panel";
+import { CopyAddressButton } from "./copy-address-button";
 
 export const dynamic = "force-dynamic";
 
@@ -45,6 +47,18 @@ export default async function PharmacyDetail({
     },
   });
   if (!order) notFound();
+
+  // Pull the shipping address from Shopify if we have a linked order. Done
+  // server-side, on every page load — fresh data, no caching, low volume so
+  // the latency hit doesn't matter.
+  let shipping: Awaited<ReturnType<typeof getOrderShippingDetails>> = null;
+  if (order.intake.shopifyOrderId) {
+    try {
+      shipping = await getOrderShippingDetails(order.intake.shopifyOrderId);
+    } catch (err) {
+      console.error("[pharmacy] shopify fetch failed:", err);
+    }
+  }
 
   return (
     <div className="shell" style={{ maxWidth: 1040 }}>
@@ -83,21 +97,62 @@ export default async function PharmacyDetail({
 
           <section className="card" style={{ marginBottom: 18 }}>
             <h2 style={H2}>Ship to</h2>
-            <Grid2>
-              <Field k="Patient" v={`${order.intake.patientFirstName} ${order.intake.patientLastName}`} />
-              <Field k="State" v={order.intake.patientState} />
-              <Field k="Email" v={<a href={`mailto:${order.intake.patientEmail}`}>{order.intake.patientEmail}</a>} />
-              <Field k="Phone" v={order.intake.patientPhone} />
-            </Grid2>
-            <div style={{ marginTop: 10, padding: 10, background: "#F4F1EA", borderRadius: 4, fontSize: 12, color: "var(--merit-soft)", lineHeight: 1.5 }}>
-              Full shipping address lives in Shopify order{" "}
-              {order.intake.shopifyOrderName ? (
-                <strong style={{ fontFamily: "'JetBrains Mono',monospace" }}>{order.intake.shopifyOrderName}</strong>
-              ) : (
-                "—"
-              )}{" "}
-              · pull it from there when generating the label.
-            </div>
+            {shipping?.shippingAddress ? (
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+                <div>
+                  <div style={{ fontSize: 11, color: "var(--merit-soft)", fontFamily: "'JetBrains Mono',monospace", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 6 }}>
+                    Shipping address
+                  </div>
+                  <address style={{ fontStyle: "normal", fontSize: 14, lineHeight: 1.55 }}>
+                    <strong>{shipping.shippingAddress.name ?? `${order.intake.patientFirstName} ${order.intake.patientLastName}`}</strong>
+                    {shipping.shippingAddress.company && (
+                      <>
+                        <br />
+                        {shipping.shippingAddress.company}
+                      </>
+                    )}
+                    <br />
+                    {shipping.shippingAddress.address1}
+                    {shipping.shippingAddress.address2 && (
+                      <>
+                        <br />
+                        {shipping.shippingAddress.address2}
+                      </>
+                    )}
+                    <br />
+                    {shipping.shippingAddress.city}, {shipping.shippingAddress.provinceCode ?? shipping.shippingAddress.province} {shipping.shippingAddress.zip}
+                    <br />
+                    {shipping.shippingAddress.country}
+                  </address>
+                </div>
+                <div>
+                  <div style={{ fontSize: 11, color: "var(--merit-soft)", fontFamily: "'JetBrains Mono',monospace", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 6 }}>
+                    Contact
+                  </div>
+                  <div style={{ fontSize: 14, lineHeight: 1.55 }}>
+                    <a href={`mailto:${shipping.email ?? order.intake.patientEmail}`}>{shipping.email ?? order.intake.patientEmail}</a>
+                    <br />
+                    {shipping.shippingAddress.phone ?? order.intake.patientPhone}
+                  </div>
+                  <CopyAddressButton
+                    text={[
+                      shipping.shippingAddress.name,
+                      shipping.shippingAddress.company,
+                      shipping.shippingAddress.address1,
+                      shipping.shippingAddress.address2,
+                      `${shipping.shippingAddress.city}, ${shipping.shippingAddress.provinceCode ?? shipping.shippingAddress.province} ${shipping.shippingAddress.zip}`,
+                      shipping.shippingAddress.country,
+                    ].filter(Boolean).join("\n")}
+                  />
+                </div>
+              </div>
+            ) : (
+              <div style={{ padding: 12, background: "#FFF5DC", borderRadius: 4, fontSize: 13, color: "#8B6B00", lineHeight: 1.5 }}>
+                {order.intake.shopifyOrderId
+                  ? "Couldn't load shipping address from Shopify right now. Open the order in Shopify Admin directly to ship."
+                  : "No Shopify order linked yet — payment hasn't been received. Shipping address will load here once it does."}
+              </div>
+            )}
           </section>
 
           {(order.trackingNumber || order.trackingCarrier) && (

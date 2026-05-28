@@ -14,6 +14,7 @@
 
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { createShopifyFulfillment } from "@/lib/shopify";
 
 async function requirePharmacy() {
   const session = await auth();
@@ -76,9 +77,34 @@ export async function markShipped(
   const { userId } = await requirePharmacy();
   const order = await prisma.pharmacyOrder.findUnique({
     where: { id: orderId },
-    select: { status: true, intakeId: true },
+    select: {
+      status: true,
+      intakeId: true,
+      intake: { select: { shopifyOrderId: true } },
+    },
   });
   if (!order) throw new Error("Order not found");
+
+  // First, do the Shopify-side fulfillment so the customer receives the
+  // automatic shipping-confirmation email with the tracking link. If
+  // Shopify fails (no order linked, scope issue, etc.) we still record
+  // the local state change but flag the failure on the audit row so ops
+  // knows to retry manually.
+  let shopifyResult: { ok: true; fulfillmentId: string } | { ok: false; error: string } = {
+    ok: false,
+    error: "no Shopify order linked",
+  };
+  if (order.intake.shopifyOrderId) {
+    try {
+      shopifyResult = await createShopifyFulfillment(order.intake.shopifyOrderId, {
+        carrier: tracking.carrier,
+        number: tracking.trackingNumber,
+        url: tracking.trackingUrl,
+      });
+    } catch (err) {
+      shopifyResult = { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  }
 
   await prisma.$transaction([
     prisma.pharmacyOrder.update({
@@ -96,7 +122,11 @@ export async function markShipped(
         pharmacyOrderId: orderId,
         actorId: userId,
         action: "MARK_SHIPPED",
-        payload: tracking,
+        payload: {
+          ...tracking,
+          shopifyFulfillmentId: shopifyResult.ok ? shopifyResult.fulfillmentId : null,
+          shopifyError: shopifyResult.ok ? null : shopifyResult.error,
+        },
       },
     }),
     prisma.intake.update({
@@ -104,10 +134,6 @@ export async function markShipped(
       data: { status: "SHIPPED" },
     }),
   ]);
-
-  // TODO: Shopify — attach tracking to the Shopify order so the customer's
-  // /account/orders page shows the live tracking link. Needs portal-side
-  // Shopify Admin client.
 }
 
 export async function markDelivered(orderId: string, _actorEmail: string) {
