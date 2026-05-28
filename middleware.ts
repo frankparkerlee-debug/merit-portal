@@ -23,6 +23,7 @@ export default async function middleware(req: NextRequest) {
     path.startsWith("/signin") ||
     path.startsWith("/api/auth") ||
     path.startsWith("/api/signin") ||
+    path.startsWith("/api/intake") ||  // patient submission + ID photo serve route
     path.startsWith("/api/shopify-webhook");
 
   // Read the raw decoded JWT (no session callback indirection). In production
