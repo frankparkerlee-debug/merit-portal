@@ -10,3 +10,4 @@ node_modules/
 .render
 prisma/migrations/
 !prisma/migrations/.gitkeep
+.playwright-mcp/
